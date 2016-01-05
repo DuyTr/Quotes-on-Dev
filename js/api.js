@@ -1,69 +1,131 @@
-(function ($) {
-	'use strict';
+(function () {
 
-   /**
-    * Ajax-based random post fetching.
-    */
+    'use strict';
+    angular.module('quotesondev', [])
 
-	$(function(){
-		$('#new-quote-button').on('click',function(event){
-			event.preventDefault();
+    .config(['$locationProvider', function($locationProvider) {
 
-			$.ajax({
-				method: 'get',
-				url: api_vars.root_url + 'wp/v2/posts?filter[orderby]=rand&filter[posts_per_page]=1',
-				cache: false
-			}).done(function(data){
-				var post = data.shift(),
-						quoteSource = post._qod_quote_source,
-						quoteSourceUrl = post._qod_quote_source_url,
-						$sourceSpan = $('.source');
 
-				$('.entry-content').html(post.content.rendered);
-				$('.entry-title').html('<h2 class="entry-title">&mdash; '+post.title.rendered+'</h2>');
-				if (quoteSource && quoteSourceUrl){
-					$sourceSpan.html(', <a href="' + quoteSourceUrl + '">' + quoteSource + '</a>');
-				} else if (quoteSource){
-					$sourceSpan.html(', ' + quoteSource);
-				} else{
-					$sourceSpan.html('');
-				}
-			});
-		});
-	});
+    }])
 
-   /**
-    * Ajax-based front-end post submissions.
-    */
-	$('#quote-submission-form').on('submit',function(event){
-		event.preventDefault();
+    .value('QUOTE_API', {
+			GET_URL: api_vars.root_url + 'wp/v2/posts',
+			POST_URL: api_vars.root_url + 'wp/v2/posts',
+			POST_HEADERS: {
+				'X-WP-Nonce': api_vars.nonce
+			}
+    })
 
-		var title = $('#quote-author').val(),
-				content = $('#quote-content').val(),
-				quoteSource = $('#quote-source').val(),
-				quoteSourceUrl = $('#quote-source-url').val();
+    .factory('templateSrc', function(){
+        var template_src_url ='/quotesondev/wp-content/themes/quotesondev/build/js/angular/templates/';
+        return function(name){
+            return template_src_url + name + '.html'
+        }
 
-		var data = {
-			title: title,
-			content: content,
-			_qod_quote_source: quoteSource,
-			_qod_quote_source_url: quoteSourceUrl,
-			post_status: "pending"
-		};
+    })
 
-		$.ajax({
-			method: 'POST',
-			url: api_vars.root_url + 'wp/v2/posts',
-			data: data,
-			beforeSend: function ( xhr ) {
-                xhr.setRequestHeader( 'X-WP-Nonce', api_vars.nonce );
+    .factory('quotes', ['$http', 'QUOTE_API', '$q' ,function($http, QUOTE_API,$q){
+        return{
+					getRandomQuote: function(){
+
+            var deferred = $q.defer();
+
+						var req = {
+							method: 'GET',
+							url: QUOTE_API.GET_URL + '?filter[orderby]=rand&filter[posts_per_page]=1'
+						}
+
+            function quote(response){
+              var quote = response.data[0];
+              return {
+                title: quote.title.rendered,
+                source: quote._qod_quote_source,
+                source_url: quote._qod_quote_source_url,
+                slug: quote.slug,
+                content: angular.element(quote.content.rendered).text()
+              }
             }
-		}).done(function(response){
-			$('#quote-submission-form').slideUp();
-			$('.submit-success-message').text(api_vars.success).slideDown('slow');
-		}).fail(function(){
-			alert(api_vars.fail);
-		});
-});
+            function getRandomQuoteSuccess(response){
+              deferred.resolve(quote(response));
+            }
 
-}(jQuery));
+            function getRandomQuoteFail(error){
+              deferred.reject(error);
+            }
+						$http(req).then(getRandomQuoteSuccess,getRandomQuoteFail);
+
+            return deferred.promise;
+					},
+					submit: function(data){
+            var abc = {
+              method: 'POST',
+              url: QUOTE_API.POST_URL,
+              headers: QUOTE_API.POST_HEADERS,
+              data: data
+            }
+            return $http(abc);
+          }
+				}
+    }])
+
+    .controller('quoteFormCtrl', ['$scope', 'quotes' ,function($scope, quotes){
+			$scope.quote = {};
+      $scope.submitSuccess = false;
+      function quoteSuccess(response){
+        $scope.submitSuccess = true;
+        angular.element(document.querySelector('.submit-success-message')).html("Submission Succeed");
+      }
+      function quoteFail(error){
+
+      }
+      $scope.quote.post_status  = 'pending';
+			$scope.submitQuote =  function(quoteForm){
+      if (!quoteForm.$valid){
+        alert('Invalid Form');
+			} else {
+        quotes.submit($scope.quote).then(quoteSuccess, quoteFail);
+      }
+    }
+    }])
+
+    .directive('quoteRotator', ['quotes', 'templateSrc', '$location', function(quotes, templateSrc, $location){
+        return{
+            restrict: 'E',
+            templateUrl: templateSrc('quote-rotator'),
+            link: function(scope,element, attrs){
+
+							function renderRandomQuote(quote){
+								scope.quote = quote;
+							}
+
+              function renderRandomQuoteError(error){
+
+              }
+
+							scope.newRandomQuote = function(){
+									quotes.getRandomQuote().then(renderRandomQuote,renderRandomQuoteError)
+							}
+							scope.newRandomQuote();
+            }
+        }
+    }])
+
+    .directive('source', function(){
+        return{
+					restrict: 'E',
+					scope:{
+						'quote':'='
+					},
+					template:'<span class="source">\
+											<span ng-if="quote.source && quote.source_url">, \
+													<a href="{{quote.source_url}}">{{quote.source}}</a>\
+											</span>\
+											<span ng-if="quote.source && !quote.source_url">, \
+													{{quote.source}}\
+											</span>\
+										</span>'
+        }
+    })
+
+
+}());
